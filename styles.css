@@ -1,4 +1,3 @@
-/* YouTube Theme Colors */
 :root {
     --ss-bg: #ffffff;
     --ss-border: rgba(0, 0, 0, 0.1);
@@ -17,7 +16,6 @@
     --ss-shadow: rgba(0, 0, 0, 0.1);
 }
 
-/* Match YouTube's native dark mode attribute */
 html[dark], html[dark="true"] {
     --ss-bg: #0f0f0f;
     --ss-border: rgba(255, 255, 255, 0.1);
@@ -119,7 +117,6 @@ html[dark], html[dark="true"] {
     gap: 4px;
 }
 
-/* Custom scrollbar for results */
 #yt-ss-results::-webkit-scrollbar {
     width: 8px;
 }
@@ -186,7 +183,6 @@ html:not([dark]) .yt-ss-highlight {
     font-size: 14px;
 }
 
-/* Active Transcript Styling */
 .yt-ss-result-item.yt-ss-active {
     background-color: var(--ss-active-bg);
     border-left: 4px solid var(--ss-active-border);

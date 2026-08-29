@@ -1,5 +1,3 @@
-// content.js
-
 let subtitles = [];
 let uiContainer = null;
 let currentVideoId = null;
@@ -8,7 +6,6 @@ let activeSubtitleIndex = -1;
 let isAutoScrollActive = true;
 let videoElement = null;
 
-// 1. Inject inject.js into the main world to access window objects
 const script = document.createElement('script');
 script.src = chrome.runtime.getURL('inject.js');
 script.onload = () => {
@@ -17,8 +14,6 @@ script.onload = () => {
 };
 (document.head || document.documentElement).appendChild(script);
 
-
-// 2. Listen for YouTube SPA navigation events
 document.addEventListener('yt-navigate-finish', handleNavigation);
 document.addEventListener('yt-page-data-updated', handleNavigation);
 
@@ -32,33 +27,27 @@ function handleNavigation() {
     const urlParams = new URLSearchParams(window.location.search);
     const videoId = urlParams.get('v');
     
-    // If we're not on a watch page, clean up
     if (!videoId) {
         removeUI();
         currentVideoId = null;
         return;
     }
     
-    // If the video ID hasn't changed, do nothing
     if (videoId === currentVideoId) return;
     
     currentVideoId = videoId;
     subtitles = [];
     activeSubtitleIndex = -1;
     
-    // Slight delay to ensure the player is fully initialized after navigation
     setTimeout(() => {
         initSubtitleSearch();
     }, 1500);
 }
 
-
-// 3. Main initialization function
 async function initSubtitleSearch() {
     removeUI();
     await injectUI();
     
-    // Wait for the injected script to load (should be almost instant)
     let attempts = 0;
     while (!injectLoaded && attempts < 50) {
         await new Promise(r => setTimeout(r, 50));
@@ -75,17 +64,15 @@ async function initSubtitleSearch() {
             return;
         }
         
-        // Find English subtitles, or fallback to the first available track
-        let track = captions.find(t => t.languageCode === 'en' && !t.kind) || // preferred: manual English
-                    captions.find(t => t.languageCode === 'en') ||            // fallback: auto-generated English
-                    captions[0];                                              // fallback: whatever is first
+        let track = captions.find(t => t.languageCode === 'en' && !t.kind) || 
+                    captions.find(t => t.languageCode === 'en') ||            
+                    captions[0];                                              
                     
         if (!track || !track.baseUrl) {
             updateStatus('Could not find a valid subtitle track.');
             return;
         }
         
-        // Fetch the XML transcript
         const response = await fetch(track.baseUrl);
         const xmlText = await response.text();
         
@@ -101,7 +88,6 @@ async function initSubtitleSearch() {
                 input.placeholder = `Search in ${subtitles.length} lines...`;
             }
             
-            // Set up video synchronization and render full transcript
             setupVideoSync();
             renderResults('');
         }
@@ -111,8 +97,6 @@ async function initSubtitleSearch() {
     }
 }
 
-
-// 4. Communication with the main world
 function getPlayerResponse() {
     return new Promise((resolve) => {
         const listener = (event) => {
@@ -124,7 +108,6 @@ function getPlayerResponse() {
         window.addEventListener('message', listener);
         window.postMessage({ type: 'GET_YT_PLAYER_RESPONSE' }, '*');
         
-        // Timeout after 3 seconds if no response
         setTimeout(() => {
             window.removeEventListener('message', listener);
             resolve(null);
@@ -132,8 +115,6 @@ function getPlayerResponse() {
     });
 }
 
-
-// 5. XML Parsing logic
 function parseSubtitles(xmlText) {
     const parser = new DOMParser();
     const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
@@ -145,22 +126,18 @@ function parseSubtitles(xmlText) {
         const start = parseFloat(node.getAttribute('start'));
         let text = node.textContent || '';
         
-        // Decode common HTML entities
         text = text.replace(/&amp;/g, '&')
                    .replace(/&lt;/g, '<')
                    .replace(/&gt;/g, '>')
                    .replace(/&#39;/g, "'")
                    .replace(/&quot;/g, '"');
                    
-        // Remove styling tags like <font color="...">
         text = text.replace(/<[^>]+>/g, '');
         
         subtitles.push({ start, text });
     }
 }
 
-
-// 6. UI Injection and management
 function injectUI() {
     return new Promise((resolve) => {
         if (document.getElementById('yt-subtitle-search-container')) {
@@ -183,7 +160,6 @@ function injectUI() {
             <div id="yt-ss-results"></div>
         `;
         
-        // Repeatedly try to insert into the DOM because YouTube loads elements dynamically
         const insertInterval = setInterval(() => {
             const secondaryCol = document.querySelector('#secondary-inner') || document.querySelector('ytd-watch-next-secondary-results-renderer');
             const primaryCol = document.querySelector('#primary-inner');
@@ -194,7 +170,6 @@ function injectUI() {
                 attachEventListeners();
                 resolve();
             } else if (primaryCol) {
-                // Fallback for theater mode or mobile layouts where secondary column doesn't exist
                 const comments = document.querySelector('ytd-comments');
                 if (comments) {
                     primaryCol.insertBefore(uiContainer, comments);
@@ -205,7 +180,6 @@ function injectUI() {
             }
         }, 500);
         
-        // Stop trying after 15 seconds to prevent infinite looping
         setTimeout(() => {
             clearInterval(insertInterval);
             resolve();
@@ -228,8 +202,6 @@ function updateStatus(msg) {
     }
 }
 
-
-// 7. Event Listeners & Search Logic
 function attachEventListeners() {
     const input = uiContainer ? uiContainer.querySelector('#yt-subtitle-search-input') : document.getElementById('yt-subtitle-search-input');
     if (input) {
@@ -252,7 +224,6 @@ function attachEventListeners() {
         });
     }
     
-    // Detect manual scrolling to break auto-sync
     if (resultsContainer) {
         const breakSync = () => {
             if (isAutoScrollActive) {
@@ -269,7 +240,6 @@ function attachEventListeners() {
             }
         });
         resultsContainer.addEventListener('mousedown', (e) => {
-            // Only break sync if they click the container background/scrollbar, not a subtitle item
             if (!e.target.closest('.yt-ss-result-item')) {
                 breakSync();
             }
@@ -283,7 +253,6 @@ function renderResults(query) {
     
     resultsContainer.innerHTML = '';
     
-    // If no query, show all subtitles. Otherwise, filter.
     let matches = [];
     if (!query) {
         matches = subtitles.map((sub, index) => ({ ...sub, index }));
@@ -291,7 +260,7 @@ function renderResults(query) {
         matches = subtitles
             .map((sub, index) => ({ ...sub, index }))
             .filter(sub => sub.text.toLowerCase().includes(query))
-            .slice(0, 200); // Limit results when searching
+            .slice(0, 200); 
     }
     
     if (matches.length === 0) {
@@ -320,7 +289,6 @@ function renderResults(query) {
         
         div.addEventListener('click', () => {
             seekVideo(match.start);
-            // Resume auto-scroll when a user explicitly clicks a subtitle
             isAutoScrollActive = true;
             const syncBtn = uiContainer ? uiContainer.querySelector('#yt-ss-sync-btn') : document.getElementById('yt-ss-sync-btn');
             if (syncBtn) syncBtn.style.display = 'none';
@@ -331,14 +299,11 @@ function renderResults(query) {
     
     resultsContainer.appendChild(fragment);
     
-    // If resetting the view (no query), immediately highlight the active one
     if (!query && activeSubtitleIndex !== -1) {
         highlightActiveSubtitle();
     }
 }
 
-
-// 8. Video Syncing Logic
 function setupVideoSync() {
     videoElement = document.querySelector('video');
     if (videoElement) {
@@ -349,7 +314,7 @@ function setupVideoSync() {
 
 function syncSubtitles() {
     const input = uiContainer ? uiContainer.querySelector('#yt-subtitle-search-input') : null;
-    if (input && input.value.trim().length > 0) return; // Don't auto-scroll while searching
+    if (input && input.value.trim().length > 0) return; 
     
     if (!videoElement || subtitles.length === 0) return;
     
@@ -389,15 +354,12 @@ function highlightActiveSubtitle() {
             const itemTop = newActive.offsetTop;
             const itemBottom = itemTop + newActive.clientHeight;
             
-            // Only scroll if the item is outside the currently visible area
             if (itemBottom > scrollTop + containerHeight) {
-                // Item has reached the bottom. Scroll so it becomes row 1 (at the top)
                 resultsContainer.scrollTo({
                     top: itemTop,
                     behavior: 'smooth'
                 });
             } else if (itemTop < scrollTop) {
-                // Item is above the view (e.g. video was rewound). Scroll so it becomes the bottom row
                 resultsContainer.scrollTo({
                     top: itemBottom - containerHeight,
                     behavior: 'smooth'
@@ -407,8 +369,6 @@ function highlightActiveSubtitle() {
     }
 }
 
-
-// 9. Utility functions
 function seekVideo(seconds) {
     const video = document.querySelector('video');
     if (video) {
