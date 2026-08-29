@@ -50,6 +50,7 @@ html[dark], html[dark="true"] {
     justify-content: space-between;
     align-items: center;
     margin-bottom: 16px;
+    min-height: 32px;
 }
 
 .yt-ss-header h3 {
