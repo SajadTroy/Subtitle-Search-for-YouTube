@@ -391,15 +391,15 @@ function highlightActiveSubtitle() {
             
             // Only scroll if the item is outside the currently visible area
             if (itemBottom > scrollTop + containerHeight) {
-                // Item is below the view, scroll down just enough to see it
+                // Item has reached the bottom. Scroll so it becomes row 1 (at the top)
                 resultsContainer.scrollTo({
-                    top: itemBottom - containerHeight,
+                    top: itemTop,
                     behavior: 'smooth'
                 });
             } else if (itemTop < scrollTop) {
-                // Item is above the view, scroll up just enough to see it
+                // Item is above the view (e.g. video was rewound). Scroll so it becomes the bottom row
                 resultsContainer.scrollTo({
-                    top: itemTop,
+                    top: itemBottom - containerHeight,
                     behavior: 'smooth'
                 });
             }
