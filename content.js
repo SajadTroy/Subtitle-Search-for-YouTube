@@ -385,14 +385,24 @@ function highlightActiveSubtitle() {
         
         if (isAutoScrollActive) {
             const containerHeight = resultsContainer.clientHeight;
-            // The item's offsetTop is relative to its offsetParent, which should be the resultsContainer
+            const scrollTop = resultsContainer.scrollTop;
             const itemTop = newActive.offsetTop;
-            const itemHeight = newActive.clientHeight;
+            const itemBottom = itemTop + newActive.clientHeight;
             
-            resultsContainer.scrollTo({
-                top: itemTop - (containerHeight / 2) + (itemHeight / 2),
-                behavior: 'smooth'
-            });
+            // Only scroll if the item is outside the currently visible area
+            if (itemBottom > scrollTop + containerHeight) {
+                // Item is below the view, scroll down just enough to see it
+                resultsContainer.scrollTo({
+                    top: itemBottom - containerHeight,
+                    behavior: 'smooth'
+                });
+            } else if (itemTop < scrollTop) {
+                // Item is above the view, scroll up just enough to see it
+                resultsContainer.scrollTo({
+                    top: itemTop,
+                    behavior: 'smooth'
+                });
+            }
         }
     }
 }

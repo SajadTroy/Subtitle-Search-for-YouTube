@@ -111,6 +111,7 @@ html[dark], html[dark="true"] {
     margin-top: 16px;
     max-height: 350px;
     overflow-y: auto;
+    position: relative;
     border-top: 1px solid var(--ss-border);
     padding-top: 8px;
     display: flex;
