@@ -4,15 +4,15 @@
     --ss-text: #0f0f0f;
     --ss-text-sec: #606060;
     --ss-hover: rgba(0, 0, 0, 0.05);
-    --ss-active-bg: rgba(6, 95, 212, 0.08);
-    --ss-active-border: #065fd4;
-    --ss-time: #065fd4;
-    --ss-time-bg: rgba(6, 95, 212, 0.05);
+    --ss-active-bg: rgba(255, 0, 0, 0.08);
+    --ss-active-border: #FF0000;
+    --ss-time: #FF0000;
+    --ss-time-bg: rgba(255, 0, 0, 0.05);
     --ss-input-bg: #f8f8f8;
     --ss-input-border: #cccccc;
-    --ss-btn-bg: rgba(6, 95, 212, 0.1);
-    --ss-btn-text: #065fd4;
-    --ss-btn-hover: rgba(6, 95, 212, 0.2);
+    --ss-btn-bg: rgba(255, 0, 0, 0.1);
+    --ss-btn-text: #FF0000;
+    --ss-btn-hover: rgba(255, 0, 0, 0.2);
     --ss-shadow: rgba(0, 0, 0, 0.1);
 }
 
@@ -22,15 +22,15 @@ html[dark], html[dark="true"] {
     --ss-text: #f1f1f1;
     --ss-text-sec: #aaaaaa;
     --ss-hover: rgba(255, 255, 255, 0.1);
-    --ss-active-bg: rgba(255, 255, 255, 0.12);
-    --ss-active-border: #3ea6ff;
-    --ss-time: #3ea6ff;
-    --ss-time-bg: rgba(62, 166, 255, 0.1);
+    --ss-active-bg: rgba(255, 0, 0, 0.15);
+    --ss-active-border: #FF4E45;
+    --ss-time: #FF4E45;
+    --ss-time-bg: rgba(255, 78, 69, 0.15);
     --ss-input-bg: #121212;
     --ss-input-border: rgba(255, 255, 255, 0.1);
-    --ss-btn-bg: rgba(62, 166, 255, 0.15);
-    --ss-btn-text: #3ea6ff;
-    --ss-btn-hover: rgba(62, 166, 255, 0.25);
+    --ss-btn-bg: rgba(255, 78, 69, 0.15);
+    --ss-btn-text: #FF4E45;
+    --ss-btn-hover: rgba(255, 78, 69, 0.25);
     --ss-shadow: rgba(0, 0, 0, 0.4);
 }
 
