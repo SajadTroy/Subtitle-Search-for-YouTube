@@ -14,7 +14,9 @@
   - Intercepting manual user scrolling to break sync
 - **`inject.js`**: A script injected directly into the Main World of the page. Because content scripts live in an Isolated World, they cannot directly read variables like `window.ytInitialPlayerResponse`. This script fetches the player response and uses `postMessage` to pass the subtitle URL back to `content.js`.
 - **`styles.css`**: Defines the user interface. It utilizes CSS Variables tied to YouTube's `<html dark>` attribute to seamlessly toggle between YouTube's native Light and Dark themes.
+- **`LICENSE`**: The MIT open-source license for the project.
 
 ## Update Log
 *Note: Add a new entry here whenever a file is created, modified significantly, or deleted.*
 - **2026-08-29**: Created base extension files (`manifest.json`, `content.js`, `inject.js`, `styles.css`). Implemented core search, live-sync auto-scrolling, native YouTube theming, and stripped all comments from code per user rules.
+- **2026-08-29**: Added standard MIT open-source `LICENSE` file.
