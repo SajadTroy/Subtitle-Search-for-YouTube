@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Subtitle Search for YouTube",
+  "version": "1.0",
+  "description": "Search through a YouTube video's subtitles and jump to exact timestamps.",
+  "permissions": [],
+  "host_permissions": [
+    "*://*.youtube.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["*://*.youtube.com/*"],
+      "js": ["content.js"],
+      "css": ["styles.css"],
+      "run_at": "document_end"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["inject.js"],
+      "matches": ["*://*.youtube.com/*"]
+    }
+  ]
+}
