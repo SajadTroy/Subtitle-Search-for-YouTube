@@ -50,7 +50,7 @@ html[dark], html[dark="true"] {
     justify-content: space-between;
     align-items: center;
     margin-bottom: 16px;
-    min-height: 32px;
+    min-height: 40px;
 }
 
 .yt-ss-header h3 {
@@ -69,29 +69,30 @@ html[dark], html[dark="true"] {
 .yt-ss-bmc-btn {
     display: inline-flex;
     align-items: center;
-    transition: transform 0.2s ease;
-}
-
-.yt-ss-bmc-btn:hover {
-    transform: scale(1.05);
 }
 
 .yt-ss-bmc-btn img {
-    height: 24px;
+    height: 34px;
     width: auto;
+    display: block;
 }
 
 .yt-ss-sync-btn {
     background: var(--ss-btn-bg);
     border: 1px solid transparent;
     color: var(--ss-btn-text);
-    border-radius: 16px;
-    padding: 6px 12px;
-    font-size: 12px;
+    border-radius: 8px; /* Matches BMC button curvature at larger size */
+    height: 36px;
+    padding: 0 16px;
+    font-size: 14px;
     font-weight: 500;
     cursor: pointer;
     transition: all 0.2s ease;
     font-family: inherit;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
 }
 
 .yt-ss-sync-btn:hover {
