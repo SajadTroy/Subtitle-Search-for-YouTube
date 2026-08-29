@@ -17,7 +17,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["inject.js"],
+      "resources": ["inject.js", "src/bmcbrand/SVG_Files/*"],
       "matches": ["*://*.youtube.com/*"]
     }
   ]

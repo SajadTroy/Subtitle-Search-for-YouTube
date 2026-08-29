@@ -151,7 +151,12 @@ function injectUI() {
         uiContainer.innerHTML = `
             <div class="yt-ss-header">
                 <h3>Subtitle Search</h3>
-                <button id="yt-ss-sync-btn" class="yt-ss-sync-btn" style="display: none;">Sync to Video</button>
+                <div class="yt-ss-header-actions">
+                    <button id="yt-ss-sync-btn" class="yt-ss-sync-btn" style="display: none;">Sync to Video</button>
+                    <a href="https://www.buymeacoffee.com/sajadtroy" target="_blank" title="Buy me a coffee" class="yt-ss-bmc-btn">
+                        <img src="${chrome.runtime.getURL('src/bmcbrand/SVG_Files/bmc-button.svg')}" alt="Buy me a coffee" />
+                    </a>
+                </div>
             </div>
             <div class="yt-ss-search-box">
                 <input type="text" id="yt-subtitle-search-input" placeholder="Loading..." disabled autocomplete="off" spellcheck="false" />

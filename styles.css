@@ -60,6 +60,27 @@ html[dark], html[dark="true"] {
     color: var(--ss-text);
 }
 
+.yt-ss-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.yt-ss-bmc-btn {
+    display: inline-flex;
+    align-items: center;
+    transition: transform 0.2s ease;
+}
+
+.yt-ss-bmc-btn:hover {
+    transform: scale(1.05);
+}
+
+.yt-ss-bmc-btn img {
+    height: 24px;
+    width: auto;
+}
+
 .yt-ss-sync-btn {
     background: var(--ss-btn-bg);
     border: 1px solid transparent;

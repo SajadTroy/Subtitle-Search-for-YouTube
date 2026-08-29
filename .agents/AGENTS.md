@@ -20,3 +20,4 @@
 *Note: Add a new entry here whenever a file is created, modified significantly, or deleted.*
 - **2026-08-29**: Created base extension files (`manifest.json`, `content.js`, `inject.js`, `styles.css`). Implemented core search, live-sync auto-scrolling, native YouTube theming, and stripped all comments from code per user rules.
 - **2026-08-29**: Added standard MIT open-source `LICENSE` file.
+- **2026-08-29**: Added subtle Buy Me A Coffee logo to the UI header, sourcing the SVG from the local `src` folder, and updated manifest permissions.
