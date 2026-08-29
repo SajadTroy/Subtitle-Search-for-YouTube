@@ -16,5 +16,11 @@ A fast, lightweight Chrome Extension (Manifest V3) that empowers you to instantl
 4. Click **"Load unpacked"** and select the folder containing this extension.
 5. Open any YouTube video with subtitles to see the extension in action!
 
+## Support
+If you find this extension helpful, consider supporting its development!
+
+<a href="https://github.com/sponsors/sajadtroy"><img src="https://img.shields.io/static/v1?label=Sponsor&message=%E2%9D%A4&logo=GitHub&color=%23fe8e86" alt="GitHub Sponsors" /></a>
+<a href="https://www.buymeacoffee.com/sajadtroy"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="28" /></a>
+
 ## License
 This project is open-source and licensed under the [MIT License](LICENSE).
