@@ -225,6 +225,8 @@ function attachEventListeners() {
             syncBtn.style.display = 'none';
             if (activeSubtitleIndex !== -1) {
                 highlightActiveSubtitle();
+            } else if (resultsContainer) {
+                resultsContainer.scrollTo({ top: 0, behavior: 'smooth' });
             }
         });
     }
