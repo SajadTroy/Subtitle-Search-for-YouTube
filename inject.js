@@ -69,18 +69,26 @@
 
         if (event.data.type === 'FORCE_LOAD_SUBTITLES') {
             const expectedVideoId = event.data.videoId;
-            const player = document.getElementById('movie_player');
-            if (player) {
+            const targetLang = event.data.lang;
+            
+            const checkAndForceLoad = (attempts) => {
+                const player = document.getElementById('movie_player');
+                if (!player) {
+                    if (attempts < 20) setTimeout(() => checkAndForceLoad(attempts + 1), 250);
+                    return;
+                }
+
                 const videoData = player.getVideoData && player.getVideoData();
                 if (videoData && expectedVideoId && videoData.video_id !== expectedVideoId) {
+                    if (attempts < 20) setTimeout(() => checkAndForceLoad(attempts + 1), 250);
                     return;
                 }
 
                 const options = player.getOption && player.getOption('captions', 'tracklist');
                 if (options && options.length > 0) {
                     const currentTrack = player.getOption('captions', 'track');
-                    const targetLang = event.data.lang || (options[0] && options[0].languageCode);
-                    const targetTrack = options.find(t => t.languageCode === targetLang) || options[0];
+                    const lang = targetLang || (options[0] && options[0].languageCode);
+                    const targetTrack = options.find(t => t.languageCode === lang) || options[0];
 
                     if (targetTrack) {
                         player.toggleSubtitlesOn && player.toggleSubtitlesOn();
@@ -110,7 +118,9 @@
                         if (window._restoreCaptionTrack) window._restoreCaptionTrack();
                     }, 10000);
                 }
-            }
+            };
+
+            checkAndForceLoad(0);
         }
 
     });

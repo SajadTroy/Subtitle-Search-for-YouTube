@@ -75,6 +75,13 @@ async function initSubtitleSearch() {
         showLoading();
 
         const pr = await getPlayerResponse(currentVideoId);
+        
+        if (subtitles.length > 0) {
+            updateStatus('');
+            clearLoading();
+            return;
+        }
+
         window._lastPlayerResponse = pr;
         const captions = pr?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
 
