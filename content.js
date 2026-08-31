@@ -5,6 +5,8 @@ let injectLoaded = false;
 let activeSubtitleIndex = -1;
 let isAutoScrollActive = true;
 let videoElement = null;
+let interceptedData = {};
+let subtitleLoadTimeout = null;
 
 const script = document.createElement('script');
 script.src = chrome.runtime.getURL('inject.js');
@@ -23,78 +25,142 @@ if (document.readyState === 'loading') {
     handleNavigation();
 }
 
+window.addEventListener('message', (event) => {
+    if (event.source !== window) return;
+
+    if (event.data.type === 'YT_INTERCEPTED_SUBTITLES' && event.data.data && event.data.data.trim()) {
+        interceptedData[Date.now()] = event.data.data;
+        parseSubtitles(event.data.data);
+        if (subtitles.length > 0) {
+            onSubtitlesLoaded();
+        }
+    }
+});
+
 function handleNavigation() {
     const urlParams = new URLSearchParams(window.location.search);
     const videoId = urlParams.get('v');
-    
+
     if (!videoId) {
         removeUI();
         currentVideoId = null;
         return;
     }
-    
+
     if (videoId === currentVideoId) return;
-    
+
     currentVideoId = videoId;
     subtitles = [];
     activeSubtitleIndex = -1;
-    
-    setTimeout(() => {
+    interceptedData = {};
+
+    if (subtitleLoadTimeout) clearTimeout(subtitleLoadTimeout);
+
+    subtitleLoadTimeout = setTimeout(() => {
         initSubtitleSearch();
-    }, 1500);
+    }, 800);
 }
 
 async function initSubtitleSearch() {
     removeUI();
     await injectUI();
-    
+
     let attempts = 0;
     while (!injectLoaded && attempts < 50) {
         await new Promise(r => setTimeout(r, 50));
         attempts++;
     }
-    
+
     try {
         updateStatus('Fetching subtitles...');
+
         const pr = await getPlayerResponse();
-        
+        window._lastPlayerResponse = pr;
         const captions = pr?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+
         if (!captions || captions.length === 0) {
-            updateStatus('No subtitles available for this video (or they are auto-generated and disabled).');
+            updateStatus('No subtitles available for this video.');
             return;
         }
-        
-        let track = captions.find(t => t.languageCode === 'en' && !t.kind) || 
-                    captions.find(t => t.languageCode === 'en') ||            
-                    captions[0];                                              
-                    
+
+        let track = captions.find(t => t.languageCode === 'en' && !t.kind) ||
+                    captions.find(t => t.languageCode === 'en') ||
+                    captions[0];
+
         if (!track || !track.baseUrl) {
             updateStatus('Could not find a valid subtitle track.');
             return;
         }
-        
-        const response = await fetch(track.baseUrl);
-        const xmlText = await response.text();
-        
-        parseSubtitles(xmlText);
-        
-        if (subtitles.length === 0) {
-            updateStatus('Failed to parse subtitles.');
-        } else {
-            updateStatus('');
-            const input = uiContainer ? uiContainer.querySelector('#yt-subtitle-search-input') : document.getElementById('yt-subtitle-search-input');
-            if (input) {
-                input.disabled = false;
-                input.placeholder = `Search in ${subtitles.length} lines...`;
-            }
-            
-            setupVideoSync();
-            renderResults('');
+
+        let loaded = await tryDirectFetch(track);
+
+        if (!loaded) {
+            updateStatus('Loading subtitles via player...');
+            window.postMessage({ type: 'FORCE_LOAD_SUBTITLES', lang: track.languageCode }, '*');
+
+            loaded = await waitForInterceptedSubtitles(6000);
         }
+
+        if (!loaded) {
+            updateStatus('Subtitles could not be loaded for this video.');
+        }
+
     } catch (err) {
-        console.error('Subtitle Search Error:', err);
-        updateStatus('Error loading subtitles. Check console for details.');
+        updateStatus('Error loading subtitles.');
     }
+}
+
+async function tryDirectFetch(track) {
+    const formats = ['json3', 'srv1', ''];
+    for (const fmt of formats) {
+        try {
+            const url = fmt
+                ? track.baseUrl + (track.baseUrl.includes('?') ? '&' : '?') + 'fmt=' + fmt
+                : track.baseUrl;
+            const response = await fetch(url);
+            const text = await response.text();
+            if (text && text.trim() && response.status === 200) {
+                parseSubtitles(text);
+                if (subtitles.length > 0) {
+                    onSubtitlesLoaded();
+                    return true;
+                }
+            }
+        } catch (e) {}
+    }
+    return false;
+}
+
+function waitForInterceptedSubtitles(timeout) {
+    return new Promise(resolve => {
+        if (subtitles.length > 0) {
+            resolve(true);
+            return;
+        }
+
+        const checkInterval = setInterval(() => {
+            if (subtitles.length > 0) {
+                clearInterval(checkInterval);
+                resolve(true);
+            }
+        }, 200);
+
+        setTimeout(() => {
+            clearInterval(checkInterval);
+            resolve(subtitles.length > 0);
+        }, timeout);
+    });
+}
+
+function onSubtitlesLoaded() {
+    updateStatus('');
+    const input = uiContainer ? uiContainer.querySelector('#yt-subtitle-search-input') : document.getElementById('yt-subtitle-search-input');
+    if (input) {
+        input.disabled = false;
+        input.placeholder = `Search in ${subtitles.length} lines...`;
+    }
+    setupVideoSync();
+    renderResults('');
 }
 
 function getPlayerResponse() {
@@ -104,10 +170,10 @@ function getPlayerResponse() {
             window.removeEventListener('message', listener);
             resolve(event.data.data);
         };
-        
+
         window.addEventListener('message', listener);
         window.postMessage({ type: 'GET_YT_PLAYER_RESPONSE' }, '*');
-        
+
         setTimeout(() => {
             window.removeEventListener('message', listener);
             resolve(null);
@@ -115,26 +181,65 @@ function getPlayerResponse() {
     });
 }
 
-function parseSubtitles(xmlText) {
-    const parser = new DOMParser();
-    const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
-    const textNodes = xmlDoc.getElementsByTagName('text');
-    
+function parseSubtitles(responseText) {
     subtitles = [];
-    for (let i = 0; i < textNodes.length; i++) {
-        const node = textNodes[i];
-        const start = parseFloat(node.getAttribute('start'));
-        let text = node.textContent || '';
-        
-        text = text.replace(/&amp;/g, '&')
-                   .replace(/&lt;/g, '<')
-                   .replace(/&gt;/g, '>')
-                   .replace(/&#39;/g, "'")
-                   .replace(/&quot;/g, '"');
-                   
-        text = text.replace(/<[^>]+>/g, '');
-        
-        subtitles.push({ start, text });
+
+    try {
+        const data = JSON.parse(responseText);
+        if (data.events) {
+            data.events.forEach(event => {
+                if (!event.segs) return;
+                const start = (event.tStartMs || 0) / 1000;
+                let text = event.segs.map(seg => seg.utf8).join('');
+                if (text.trim()) {
+                    subtitles.push({ start, text });
+                }
+            });
+            if (subtitles.length > 0) return;
+        }
+    } catch (e) {}
+
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(responseText, 'text/xml');
+
+    let nodes = xmlDoc.getElementsByTagName('text');
+    if (nodes.length > 0) {
+        for (let i = 0; i < nodes.length; i++) {
+            const node = nodes[i];
+            const start = parseFloat(node.getAttribute('start')) || 0;
+            let text = node.textContent || '';
+            text = text.replace(/<[^>]+>/g, '');
+            if (text.trim()) subtitles.push({ start, text });
+        }
+        return;
+    }
+
+    nodes = xmlDoc.getElementsByTagName('p');
+    if (nodes.length > 0) {
+        for (let i = 0; i < nodes.length; i++) {
+            const node = nodes[i];
+            let start = 0;
+            if (node.getAttribute('t')) {
+                start = parseFloat(node.getAttribute('t')) / 1000;
+            } else if (node.getAttribute('start')) {
+                start = parseFloat(node.getAttribute('start'));
+            }
+            let text = node.textContent || '';
+            text = text.replace(/<[^>]+>/g, '');
+            if (text.trim()) subtitles.push({ start, text });
+        }
+        if (subtitles.length > 0) return;
+    }
+
+    if (responseText.includes('WEBVTT')) {
+        const vttRegex = /(\d{2}:\d{2}:\d{2}\.\d{3})\s*-->\s*\d{2}:\d{2}:\d{2}\.\d{3}\n([\s\S]*?)(?=\n\n|\n\d{2}:\d{2}|\n*$)/g;
+        let match;
+        while ((match = vttRegex.exec(responseText)) !== null) {
+            const timeParts = match[1].split(':');
+            const start = parseFloat(timeParts[0]) * 3600 + parseFloat(timeParts[1]) * 60 + parseFloat(timeParts[2]);
+            let text = match[2].replace(/<[^>]+>/g, '').replace(/\n/g, ' ').trim();
+            if (text) subtitles.push({ start, text });
+        }
     }
 }
 
@@ -145,7 +250,7 @@ function injectUI() {
             resolve();
             return;
         }
-        
+
         uiContainer = document.createElement('div');
         uiContainer.id = 'yt-subtitle-search-container';
         uiContainer.innerHTML = `
@@ -164,11 +269,11 @@ function injectUI() {
             <div id="yt-ss-status"></div>
             <div id="yt-ss-results"></div>
         `;
-        
+
         const insertInterval = setInterval(() => {
             const secondaryCol = document.querySelector('#secondary-inner') || document.querySelector('ytd-watch-next-secondary-results-renderer');
             const primaryCol = document.querySelector('#primary-inner');
-            
+
             if (secondaryCol) {
                 secondaryCol.insertBefore(uiContainer, secondaryCol.firstChild);
                 clearInterval(insertInterval);
@@ -184,7 +289,7 @@ function injectUI() {
                 }
             }
         }, 500);
-        
+
         setTimeout(() => {
             clearInterval(insertInterval);
             resolve();
@@ -215,10 +320,10 @@ function attachEventListeners() {
             renderResults(query);
         });
     }
-    
+
     const syncBtn = uiContainer ? uiContainer.querySelector('#yt-ss-sync-btn') : document.getElementById('yt-ss-sync-btn');
     const resultsContainer = uiContainer ? uiContainer.querySelector('#yt-ss-results') : document.getElementById('yt-ss-results');
-    
+
     if (syncBtn) {
         syncBtn.addEventListener('click', () => {
             isAutoScrollActive = true;
@@ -230,7 +335,7 @@ function attachEventListeners() {
             }
         });
     }
-    
+
     if (resultsContainer) {
         const breakSync = () => {
             if (isAutoScrollActive) {
@@ -238,7 +343,7 @@ function attachEventListeners() {
                 if (syncBtn) syncBtn.style.display = 'block';
             }
         };
-        
+
         resultsContainer.addEventListener('wheel', breakSync, { passive: true });
         resultsContainer.addEventListener('touchstart', breakSync, { passive: true });
         resultsContainer.addEventListener('keydown', (e) => {
@@ -257,9 +362,9 @@ function attachEventListeners() {
 function renderResults(query) {
     const resultsContainer = uiContainer ? uiContainer.querySelector('#yt-ss-results') : document.getElementById('yt-ss-results');
     if (!resultsContainer) return;
-    
+
     resultsContainer.innerHTML = '';
-    
+
     let matches = [];
     if (!query) {
         matches = subtitles.map((sub, index) => ({ ...sub, index }));
@@ -267,45 +372,45 @@ function renderResults(query) {
         matches = subtitles
             .map((sub, index) => ({ ...sub, index }))
             .filter(sub => sub.text.toLowerCase().includes(query))
-            .slice(0, 200); 
+            .slice(0, 200);
     }
-    
+
     if (matches.length === 0) {
         resultsContainer.innerHTML = '<div class="yt-ss-no-results">No matches found.</div>';
         return;
     }
-    
+
     const fragment = document.createDocumentFragment();
     matches.forEach(match => {
         const div = document.createElement('div');
         div.className = 'yt-ss-result-item';
         div.setAttribute('data-index', match.index);
-        
+
         const timeStr = formatTime(match.start);
-        
+
         let highlightedText = match.text;
         if (query) {
             const regex = new RegExp(`(${escapeRegExp(query)})`, 'gi');
             highlightedText = match.text.replace(regex, '<span class="yt-ss-highlight">$1</span>');
         }
-        
+
         div.innerHTML = `
             <span class="yt-ss-time">[${timeStr}]</span>
             <span class="yt-ss-text">${highlightedText}</span>
         `;
-        
+
         div.addEventListener('click', () => {
             seekVideo(match.start);
             isAutoScrollActive = true;
             const syncBtn = uiContainer ? uiContainer.querySelector('#yt-ss-sync-btn') : document.getElementById('yt-ss-sync-btn');
             if (syncBtn) syncBtn.style.display = 'none';
         });
-        
+
         fragment.appendChild(div);
     });
-    
+
     resultsContainer.appendChild(fragment);
-    
+
     if (!query && activeSubtitleIndex !== -1) {
         highlightActiveSubtitle();
     }
@@ -321,12 +426,12 @@ function setupVideoSync() {
 
 function syncSubtitles() {
     const input = uiContainer ? uiContainer.querySelector('#yt-subtitle-search-input') : null;
-    if (input && input.value.trim().length > 0) return; 
-    
+    if (input && input.value.trim().length > 0) return;
+
     if (!videoElement || subtitles.length === 0) return;
-    
+
     const currentTime = videoElement.currentTime;
-    
+
     let newIndex = -1;
     for (let i = 0; i < subtitles.length; i++) {
         const nextStart = i + 1 < subtitles.length ? subtitles[i+1].start : Infinity;
@@ -335,7 +440,7 @@ function syncSubtitles() {
             break;
         }
     }
-    
+
     if (newIndex !== -1 && newIndex !== activeSubtitleIndex) {
         activeSubtitleIndex = newIndex;
         highlightActiveSubtitle();
@@ -350,17 +455,17 @@ function highlightActiveSubtitle() {
     if (oldActive) {
         oldActive.classList.remove('yt-ss-active');
     }
-    
+
     const newActive = resultsContainer.querySelector(`.yt-ss-result-item[data-index="${activeSubtitleIndex}"]`);
     if (newActive) {
         newActive.classList.add('yt-ss-active');
-        
+
         if (isAutoScrollActive) {
             const containerHeight = resultsContainer.clientHeight;
             const scrollTop = resultsContainer.scrollTop;
             const itemTop = newActive.offsetTop;
             const itemBottom = itemTop + newActive.clientHeight;
-            
+
             if (itemBottom > scrollTop + containerHeight) {
                 resultsContainer.scrollTo({
                     top: itemTop,
@@ -391,7 +496,7 @@ function formatTime(seconds) {
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
     const s = Math.floor(seconds % 60);
-    
+
     if (h > 0) {
         return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
     }

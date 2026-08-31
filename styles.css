@@ -81,7 +81,7 @@ html[dark], html[dark="true"] {
     background: var(--ss-btn-bg);
     border: 1px solid transparent;
     color: var(--ss-btn-text);
-    border-radius: 8px; /* Matches BMC button curvature at larger size */
+    border-radius: 8px;
     height: 36px;
     padding: 0 16px;
     font-size: 14px;
