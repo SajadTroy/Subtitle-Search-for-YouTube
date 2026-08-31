@@ -95,14 +95,19 @@ async function initSubtitleSearch() {
         let loaded = await tryDirectFetch(track);
 
         if (!loaded) {
-            updateStatus('Loading subtitles via player...');
-            window.postMessage({ type: 'FORCE_LOAD_SUBTITLES', lang: track.languageCode }, '*');
-
-            loaded = await waitForInterceptedSubtitles(6000);
+            if (subtitles.length > 0) {
+                loaded = true;
+            } else {
+                updateStatus('Loading subtitles via player...');
+                window.postMessage({ type: 'FORCE_LOAD_SUBTITLES', lang: track.languageCode }, '*');
+                loaded = await waitForInterceptedSubtitles(6000);
+            }
         }
 
         if (!loaded) {
             updateStatus('Subtitles could not be loaded for this video.');
+        } else {
+            updateStatus('');
         }
 
     } catch (err) {
