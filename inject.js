@@ -64,11 +64,13 @@
                     const targetTrack = options.find(t => t.languageCode === targetLang) || options[0];
 
                     if (targetTrack) {
+                        player.toggleSubtitlesOn && player.toggleSubtitlesOn();
                         player.setOption('captions', 'track', targetTrack);
                         
                         window._restoreCaptionTrack = () => {
                             if (!currentTrack || !currentTrack.languageCode) {
                                 player.setOption('captions', 'track', {});
+                                player.toggleSubtitlesOff && player.toggleSubtitlesOff();
                             } else {
                                 player.setOption('captions', 'track', currentTrack);
                             }
