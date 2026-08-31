@@ -40,23 +40,42 @@
         if (event.source !== window) return;
 
         if (event.data.type === 'GET_YT_PLAYER_RESPONSE') {
-            let pr = null;
-            const player = document.getElementById('movie_player');
-            if (player && player.getPlayerResponse) {
-                pr = player.getPlayerResponse();
-            } else if (window.ytInitialPlayerResponse) {
-                pr = window.ytInitialPlayerResponse;
-            }
-            Promise.resolve(pr).then(resolvedPr => {
-                window.postMessage({ type: 'YT_PLAYER_RESPONSE', data: resolvedPr }, '*');
-            }).catch(() => {
-                window.postMessage({ type: 'YT_PLAYER_RESPONSE', data: null }, '*');
-            });
+            const expectedVideoId = event.data.videoId;
+            
+            const checkAndSend = (attempts) => {
+                let pr = null;
+                const player = document.getElementById('movie_player');
+                if (player && player.getPlayerResponse) {
+                    pr = player.getPlayerResponse();
+                } else if (window.ytInitialPlayerResponse) {
+                    pr = window.ytInitialPlayerResponse;
+                }
+                
+                if (pr && pr.videoDetails && pr.videoDetails.videoId === expectedVideoId) {
+                    Promise.resolve(pr).then(resolvedPr => {
+                        window.postMessage({ type: 'YT_PLAYER_RESPONSE', data: resolvedPr }, '*');
+                    }).catch(() => {
+                        window.postMessage({ type: 'YT_PLAYER_RESPONSE', data: null }, '*');
+                    });
+                } else if (attempts < 20) {
+                    setTimeout(() => checkAndSend(attempts + 1), 250);
+                } else {
+                    window.postMessage({ type: 'YT_PLAYER_RESPONSE', data: null }, '*');
+                }
+            };
+            
+            checkAndSend(0);
         }
 
         if (event.data.type === 'FORCE_LOAD_SUBTITLES') {
+            const expectedVideoId = event.data.videoId;
             const player = document.getElementById('movie_player');
             if (player) {
+                const videoData = player.getVideoData && player.getVideoData();
+                if (videoData && expectedVideoId && videoData.video_id !== expectedVideoId) {
+                    return;
+                }
+
                 const options = player.getOption && player.getOption('captions', 'tracklist');
                 if (options && options.length > 0) {
                     const currentTrack = player.getOption('captions', 'track');

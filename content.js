@@ -72,14 +72,15 @@ async function initSubtitleSearch() {
     }
 
     try {
-        updateStatus('Fetching subtitles...');
+        showLoading();
 
-        const pr = await getPlayerResponse();
+        const pr = await getPlayerResponse(currentVideoId);
         window._lastPlayerResponse = pr;
         const captions = pr?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
 
         if (!captions || captions.length === 0) {
             updateStatus('No subtitles available for this video.');
+            clearLoading();
             return;
         }
 
@@ -98,20 +99,23 @@ async function initSubtitleSearch() {
             if (subtitles.length > 0) {
                 loaded = true;
             } else {
-                updateStatus('Loading subtitles via player...');
-                window.postMessage({ type: 'FORCE_LOAD_SUBTITLES', lang: track.languageCode }, '*');
+                showLoading();
+                window.postMessage({ type: 'FORCE_LOAD_SUBTITLES', lang: track.languageCode, videoId: currentVideoId }, '*');
                 loaded = await waitForInterceptedSubtitles(6000);
             }
         }
 
         if (!loaded) {
             updateStatus('Subtitles could not be loaded for this video.');
+            clearLoading();
         } else {
             updateStatus('');
+            clearLoading();
         }
 
     } catch (err) {
         updateStatus('Error loading subtitles.');
+        clearLoading();
     }
 }
 
@@ -168,7 +172,7 @@ function onSubtitlesLoaded() {
     renderResults('');
 }
 
-function getPlayerResponse() {
+function getPlayerResponse(videoId) {
     return new Promise((resolve) => {
         const listener = (event) => {
             if (event.source !== window || event.data.type !== 'YT_PLAYER_RESPONSE') return;
@@ -177,12 +181,12 @@ function getPlayerResponse() {
         };
 
         window.addEventListener('message', listener);
-        window.postMessage({ type: 'GET_YT_PLAYER_RESPONSE' }, '*');
+        window.postMessage({ type: 'GET_YT_PLAYER_RESPONSE', videoId: videoId }, '*');
 
         setTimeout(() => {
             window.removeEventListener('message', listener);
             resolve(null);
-        }, 3000);
+        }, 5000);
     });
 }
 
@@ -314,6 +318,20 @@ function updateStatus(msg) {
     if (statusEl) {
         statusEl.textContent = msg;
         statusEl.style.display = msg ? 'block' : 'none';
+    }
+}
+
+function showLoading() {
+    const resultsContainer = uiContainer ? uiContainer.querySelector('#yt-ss-results') : document.getElementById('yt-ss-results');
+    if (resultsContainer) {
+        resultsContainer.innerHTML = '<div class="yt-ss-loading-container"><div class="yt-ss-spinner"></div></div>';
+    }
+}
+
+function clearLoading() {
+    const resultsContainer = uiContainer ? uiContainer.querySelector('#yt-ss-results') : document.getElementById('yt-ss-results');
+    if (resultsContainer && resultsContainer.querySelector('.yt-ss-loading-container')) {
+        resultsContainer.innerHTML = '';
     }
 }
 

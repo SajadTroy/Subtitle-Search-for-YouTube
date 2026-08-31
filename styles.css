@@ -216,3 +216,25 @@ html:not([dark]) .yt-ss-highlight {
     font-weight: 500;
     color: var(--ss-text);
 }
+
+.yt-ss-loading-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100px;
+    width: 100%;
+}
+
+.yt-ss-spinner {
+    border: 3px solid rgba(0, 0, 0, 0.1);
+    border-left-color: var(--ss-active-border);
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    animation: yt-ss-spin 1s linear infinite;
+}
+
+@keyframes yt-ss-spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
