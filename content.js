@@ -1,23 +1,23 @@
 let subtitles = [];
 let uiContainer = null;
 let currentVideoId = null;
-let injectLoaded = false;
 let activeSubtitleIndex = -1;
 let isAutoScrollActive = true;
 let videoElement = null;
-let interceptedData = {};
+let isLoadingSubtitles = false;
 let subtitleLoadTimeout = null;
 
 const script = document.createElement('script');
 script.src = chrome.runtime.getURL('inject.js');
 script.onload = () => {
-    injectLoaded = true;
     script.remove();
 };
 (document.head || document.documentElement).appendChild(script);
 
 document.addEventListener('yt-navigate-finish', handleNavigation);
 document.addEventListener('yt-page-data-updated', handleNavigation);
+document.addEventListener('yt-player-updated', handleNavigation);
+window.addEventListener('popstate', handleNavigation);
 
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', handleNavigation);
@@ -25,248 +25,95 @@ if (document.readyState === 'loading') {
     handleNavigation();
 }
 
+setInterval(checkUiAndVideoState, 1000);
+
 window.addEventListener('message', (event) => {
-    if (event.source !== window) return;
+    if (event.source !== window || !event.data || !event.data.type) return;
 
     if (event.data.type === 'YT_INTERCEPTED_SUBTITLES' && event.data.data && event.data.data.trim()) {
-        interceptedData[Date.now()] = event.data.data;
-        parseSubtitles(event.data.data);
-        if (subtitles.length > 0) {
+        const parsed = parseSubtitles(event.data.data);
+        if (parsed && parsed.length > 0) {
+            subtitles = parsed;
             onSubtitlesLoaded();
+        }
+    }
+
+    if (event.data.type === 'YT_CAPTIONS_TRACKS_AVAILABLE' && event.data.videoId === currentVideoId) {
+        if (subtitles.length === 0 && event.data.tracks && event.data.tracks.length > 0) {
+            loadSubtitlesFromTracks(event.data.tracks, event.data.videoId);
         }
     }
 });
 
-function handleNavigation() {
+function getVideoIdFromUrl() {
     const urlParams = new URLSearchParams(window.location.search);
-    const videoId = urlParams.get('v');
+    return urlParams.get('v');
+}
+
+function handleNavigation() {
+    const videoId = getVideoIdFromUrl();
 
     if (!videoId) {
         removeUI();
         currentVideoId = null;
+        subtitles = [];
+        activeSubtitleIndex = -1;
         return;
     }
 
-    if (videoId === currentVideoId) return;
+    if (videoId !== currentVideoId) {
+        currentVideoId = videoId;
+        subtitles = [];
+        activeSubtitleIndex = -1;
+        isLoadingSubtitles = false;
 
-    currentVideoId = videoId;
-    subtitles = [];
-    activeSubtitleIndex = -1;
-    interceptedData = {};
+        if (subtitleLoadTimeout) clearTimeout(subtitleLoadTimeout);
 
-    if (subtitleLoadTimeout) clearTimeout(subtitleLoadTimeout);
-
-    subtitleLoadTimeout = setTimeout(() => {
-        initSubtitleSearch();
-    }, 800);
-}
-
-async function initSubtitleSearch() {
-    removeUI();
-    await injectUI();
-
-    let attempts = 0;
-    while (!injectLoaded && attempts < 50) {
-        await new Promise(r => setTimeout(r, 50));
-        attempts++;
-    }
-
-    try {
+        ensureUiInjected();
         showLoading();
 
-        const pr = await getPlayerResponse(currentVideoId);
-        
-        if (subtitles.length > 0) {
-            updateStatus('');
-            clearLoading();
-            return;
-        }
-
-        window._lastPlayerResponse = pr;
-        const captions = pr?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-
-        if (!captions || captions.length === 0) {
-            updateStatus('No subtitles available for this video.');
-            clearLoading();
-            return;
-        }
-
-        let track = captions.find(t => t.languageCode === 'en' && !t.kind) ||
-                    captions.find(t => t.languageCode === 'en') ||
-                    captions[0];
-
-        if (!track || !track.baseUrl) {
-            updateStatus('Could not find a valid subtitle track.');
-            return;
-        }
-
-        let loaded = await tryDirectFetch(track);
-
-        if (!loaded) {
-            if (subtitles.length > 0) {
-                loaded = true;
-            } else {
-                showLoading();
-                window.postMessage({ type: 'FORCE_LOAD_SUBTITLES', lang: track.languageCode, videoId: currentVideoId }, '*');
-                loaded = await waitForInterceptedSubtitles(6000);
-            }
-        }
-
-        if (!loaded) {
-            updateStatus('Subtitles could not be loaded for this video.');
-            clearLoading();
-        } else {
-            updateStatus('');
-            clearLoading();
-        }
-
-    } catch (err) {
-        updateStatus('Error loading subtitles.');
-        clearLoading();
+        subtitleLoadTimeout = setTimeout(() => {
+            startSubtitleFlow(videoId);
+        }, 400);
+    } else {
+        ensureUiInjected();
     }
 }
 
-async function tryDirectFetch(track) {
-    const formats = ['json3', 'srv1', ''];
-    for (const fmt of formats) {
-        try {
-            const url = fmt
-                ? track.baseUrl + (track.baseUrl.includes('?') ? '&' : '?') + 'fmt=' + fmt
-                : track.baseUrl;
-            const response = await fetch(url);
-            const text = await response.text();
-            if (text && text.trim() && response.status === 200) {
-                parseSubtitles(text);
-                if (subtitles.length > 0) {
-                    onSubtitlesLoaded();
-                    return true;
-                }
-            }
-        } catch (e) {}
-    }
-    return false;
-}
+function checkUiAndVideoState() {
+    const videoId = getVideoIdFromUrl();
+    if (!videoId) return;
 
-function waitForInterceptedSubtitles(timeout) {
-    return new Promise(resolve => {
-        if (subtitles.length > 0) {
-            resolve(true);
-            return;
-        }
-
-        const checkInterval = setInterval(() => {
-            if (subtitles.length > 0) {
-                clearInterval(checkInterval);
-                resolve(true);
-            }
-        }, 200);
-
-        setTimeout(() => {
-            clearInterval(checkInterval);
-            resolve(subtitles.length > 0);
-        }, timeout);
-    });
-}
-
-function onSubtitlesLoaded() {
-    updateStatus('');
-    const input = uiContainer ? uiContainer.querySelector('#yt-subtitle-search-input') : document.getElementById('yt-subtitle-search-input');
-    if (input) {
-        input.disabled = false;
-        input.placeholder = `Search in ${subtitles.length} lines...`;
-    }
-    setupVideoSync();
-    renderResults('');
-}
-
-function getPlayerResponse(videoId) {
-    return new Promise((resolve) => {
-        const listener = (event) => {
-            if (event.source !== window || event.data.type !== 'YT_PLAYER_RESPONSE') return;
-            window.removeEventListener('message', listener);
-            resolve(event.data.data);
-        };
-
-        window.addEventListener('message', listener);
-        window.postMessage({ type: 'GET_YT_PLAYER_RESPONSE', videoId: videoId }, '*');
-
-        setTimeout(() => {
-            window.removeEventListener('message', listener);
-            resolve(null);
-        }, 5000);
-    });
-}
-
-function parseSubtitles(responseText) {
-    subtitles = [];
-
-    try {
-        const data = JSON.parse(responseText);
-        if (data.events) {
-            data.events.forEach(event => {
-                if (!event.segs) return;
-                const start = (event.tStartMs || 0) / 1000;
-                let text = event.segs.map(seg => seg.utf8).join('');
-                if (text.trim()) {
-                    subtitles.push({ start, text });
-                }
-            });
-            if (subtitles.length > 0) return;
-        }
-    } catch (e) {}
-
-    const parser = new DOMParser();
-    const xmlDoc = parser.parseFromString(responseText, 'text/xml');
-
-    let nodes = xmlDoc.getElementsByTagName('text');
-    if (nodes.length > 0) {
-        for (let i = 0; i < nodes.length; i++) {
-            const node = nodes[i];
-            const start = parseFloat(node.getAttribute('start')) || 0;
-            let text = node.textContent || '';
-            text = text.replace(/<[^>]+>/g, '');
-            if (text.trim()) subtitles.push({ start, text });
-        }
+    if (videoId !== currentVideoId) {
+        handleNavigation();
         return;
     }
 
-    nodes = xmlDoc.getElementsByTagName('p');
-    if (nodes.length > 0) {
-        for (let i = 0; i < nodes.length; i++) {
-            const node = nodes[i];
-            let start = 0;
-            if (node.getAttribute('t')) {
-                start = parseFloat(node.getAttribute('t')) / 1000;
-            } else if (node.getAttribute('start')) {
-                start = parseFloat(node.getAttribute('start'));
-            }
-            let text = node.textContent || '';
-            text = text.replace(/<[^>]+>/g, '');
-            if (text.trim()) subtitles.push({ start, text });
-        }
-        if (subtitles.length > 0) return;
+    ensureUiInjected();
+
+    if (!videoElement || !document.body.contains(videoElement)) {
+        setupVideoSync();
+    }
+}
+
+function ensureUiInjected() {
+    const videoId = getVideoIdFromUrl();
+    if (!videoId) return;
+
+    const existingContainer = document.getElementById('yt-subtitle-search-container');
+    if (existingContainer && document.body.contains(existingContainer)) {
+        uiContainer = existingContainer;
+        return;
     }
 
-    if (responseText.includes('WEBVTT')) {
-        const vttRegex = /(\d{2}:\d{2}:\d{2}\.\d{3})\s*-->\s*\d{2}:\d{2}:\d{2}\.\d{3}\n([\s\S]*?)(?=\n\n|\n\d{2}:\d{2}|\n*$)/g;
-        let match;
-        while ((match = vttRegex.exec(responseText)) !== null) {
-            const timeParts = match[1].split(':');
-            const start = parseFloat(timeParts[0]) * 3600 + parseFloat(timeParts[1]) * 60 + parseFloat(timeParts[2]);
-            let text = match[2].replace(/<[^>]+>/g, '').replace(/\n/g, ' ').trim();
-            if (text) subtitles.push({ start, text });
-        }
-    }
+    injectUI();
 }
 
 function injectUI() {
-    return new Promise((resolve) => {
-        if (document.getElementById('yt-subtitle-search-container')) {
-            uiContainer = document.getElementById('yt-subtitle-search-container');
-            resolve();
-            return;
-        }
+    const videoId = getVideoIdFromUrl();
+    if (!videoId) return;
 
+    if (!uiContainer) {
         uiContainer = document.createElement('div');
         uiContainer.id = 'yt-subtitle-search-container';
         uiContainer.innerHTML = `
@@ -285,32 +132,44 @@ function injectUI() {
             <div id="yt-ss-status"></div>
             <div id="yt-ss-results"></div>
         `;
+        attachEventListeners();
+    }
 
-        const insertInterval = setInterval(() => {
-            const secondaryCol = document.querySelector('#secondary-inner') || document.querySelector('ytd-watch-next-secondary-results-renderer');
-            const primaryCol = document.querySelector('#primary-inner');
+    const selectors = [
+        '#secondary-inner',
+        '#secondary #items',
+        'ytd-watch-next-secondary-results-renderer #items',
+        'ytd-watch-next-secondary-results-renderer',
+        '#secondary',
+        '#panels',
+        '#primary-inner #below',
+        '#primary-inner ytd-comments',
+        '#primary-inner',
+        '#below'
+    ];
 
-            if (secondaryCol) {
-                secondaryCol.insertBefore(uiContainer, secondaryCol.firstChild);
-                clearInterval(insertInterval);
-                attachEventListeners();
-                resolve();
-            } else if (primaryCol) {
-                const comments = document.querySelector('ytd-comments');
-                if (comments) {
-                    primaryCol.insertBefore(uiContainer, comments);
-                    clearInterval(insertInterval);
-                    attachEventListeners();
-                    resolve();
-                }
-            }
-        }, 500);
+    let targetElement = null;
+    for (const selector of selectors) {
+        const el = document.querySelector(selector);
+        if (el && document.body.contains(el)) {
+            targetElement = el;
+            break;
+        }
+    }
 
-        setTimeout(() => {
-            clearInterval(insertInterval);
-            resolve();
-        }, 15000);
-    });
+    if (targetElement) {
+        if (targetElement.id === 'primary-inner' || targetElement.id === 'below' || targetElement.tagName.toLowerCase() === 'ytd-comments') {
+            targetElement.parentNode.insertBefore(uiContainer, targetElement);
+        } else {
+            targetElement.insertBefore(uiContainer, targetElement.firstChild);
+        }
+
+        if (subtitles.length > 0) {
+            onSubtitlesLoaded();
+        } else if (isLoadingSubtitles) {
+            showLoading();
+        }
+    }
 }
 
 function removeUI() {
@@ -329,21 +188,275 @@ function updateStatus(msg) {
 }
 
 function showLoading() {
+    isLoadingSubtitles = true;
+    updateStatus('');
     const resultsContainer = uiContainer ? uiContainer.querySelector('#yt-ss-results') : document.getElementById('yt-ss-results');
     if (resultsContainer) {
         resultsContainer.innerHTML = '<div class="yt-ss-loading-container"><div class="yt-ss-spinner"></div></div>';
     }
+    const input = uiContainer ? uiContainer.querySelector('#yt-subtitle-search-input') : document.getElementById('yt-subtitle-search-input');
+    if (input) {
+        input.disabled = true;
+        input.placeholder = 'Loading subtitles...';
+    }
 }
 
 function clearLoading() {
+    isLoadingSubtitles = false;
     const resultsContainer = uiContainer ? uiContainer.querySelector('#yt-ss-results') : document.getElementById('yt-ss-results');
     if (resultsContainer && resultsContainer.querySelector('.yt-ss-loading-container')) {
         resultsContainer.innerHTML = '';
     }
 }
 
-function attachEventListeners() {
+async function startSubtitleFlow(videoId) {
+    if (subtitles.length > 0 && currentVideoId === videoId) {
+        clearLoading();
+        onSubtitlesLoaded();
+        return;
+    }
+
+    showLoading();
+
+    const tracks = await requestCaptionTracks(videoId);
+    if (currentVideoId !== videoId) return;
+
+    if (tracks && tracks.length > 0) {
+        const loaded = await loadSubtitlesFromTracks(tracks, videoId);
+        if (loaded || subtitles.length > 0) return;
+    }
+
+    window.postMessage({ type: 'TRIGGER_PLAYER_CAPTIONS', videoId: videoId }, '*');
+    const intercepted = await waitForSubtitles(5000, videoId);
+
+    if (currentVideoId !== videoId) return;
+
+    if (!intercepted && subtitles.length === 0) {
+        updateStatus('No subtitles available for this video.');
+        clearLoading();
+        const input = uiContainer ? uiContainer.querySelector('#yt-subtitle-search-input') : document.getElementById('yt-subtitle-search-input');
+        if (input) {
+            input.disabled = true;
+            input.placeholder = 'No subtitles available';
+        }
+    }
+}
+
+function requestCaptionTracks(videoId) {
+    return new Promise((resolve) => {
+        const listener = (event) => {
+            if (event.source !== window || !event.data) return;
+            if (event.data.type === 'YT_CAPTION_TRACKS_RESPONSE' && event.data.videoId === videoId) {
+                window.removeEventListener('message', listener);
+                resolve(event.data.tracks || []);
+            }
+        };
+
+        window.addEventListener('message', listener);
+        window.postMessage({ type: 'GET_YT_CAPTION_TRACKS', videoId: videoId }, '*');
+
+        setTimeout(() => {
+            window.removeEventListener('message', listener);
+            resolve([]);
+        }, 3500);
+    });
+}
+
+async function loadSubtitlesFromTracks(tracks, videoId) {
+    if (!tracks || tracks.length === 0) return false;
+
+    const userLang = (navigator.language || 'en').slice(0, 2).toLowerCase();
+
+    let sortedTracks = [...tracks].sort((a, b) => {
+        const aLang = (a.languageCode || '').toLowerCase();
+        const bLang = (b.languageCode || '').toLowerCase();
+
+        if (aLang === userLang && !a.kind) return -1;
+        if (bLang === userLang && !b.kind) return 1;
+        if (aLang === userLang) return -1;
+        if (bLang === userLang) return 1;
+
+        if (aLang === 'en' && !a.kind) return -1;
+        if (bLang === 'en' && !b.kind) return 1;
+        if (aLang === 'en') return -1;
+        if (bLang === 'en') return 1;
+
+        return 0;
+    });
+
+    for (const track of sortedTracks) {
+        if (currentVideoId !== videoId) return false;
+        const url = track.baseUrl || track.url;
+        if (!url) continue;
+
+        const content = await fetchSubtitleFromInject(url, videoId);
+        if (content && content.trim()) {
+            const parsed = parseSubtitles(content);
+            if (parsed && parsed.length > 0) {
+                subtitles = parsed;
+                onSubtitlesLoaded();
+                return true;
+            }
+        }
+
+        try {
+            const res = await fetch(url);
+            if (res.ok) {
+                const text = await res.text();
+                if (text && text.trim()) {
+                    const parsed = parseSubtitles(text);
+                    if (parsed && parsed.length > 0) {
+                        subtitles = parsed;
+                        onSubtitlesLoaded();
+                        return true;
+                    }
+                }
+            }
+        } catch (e) {}
+    }
+
+    return false;
+}
+
+function fetchSubtitleFromInject(url, videoId) {
+    return new Promise((resolve) => {
+        const listener = (event) => {
+            if (event.source !== window || !event.data) return;
+            if (event.data.type === 'FETCH_SUBTITLE_RESULT' && event.data.videoId === videoId && event.data.url === url) {
+                window.removeEventListener('message', listener);
+                resolve(event.data.data || '');
+            }
+        };
+
+        window.addEventListener('message', listener);
+        window.postMessage({ type: 'FETCH_SUBTITLE_URL', videoId: videoId, url: url }, '*');
+
+        setTimeout(() => {
+            window.removeEventListener('message', listener);
+            resolve('');
+        }, 4000);
+    });
+}
+
+function waitForSubtitles(timeout, videoId) {
+    return new Promise((resolve) => {
+        if (subtitles.length > 0) {
+            resolve(true);
+            return;
+        }
+
+        const interval = setInterval(() => {
+            if (subtitles.length > 0 || currentVideoId !== videoId) {
+                clearInterval(interval);
+                resolve(subtitles.length > 0);
+            }
+        }, 150);
+
+        setTimeout(() => {
+            clearInterval(interval);
+            resolve(subtitles.length > 0);
+        }, timeout);
+    });
+}
+
+function decodeHtmlEntities(str) {
+    if (!str) return '';
+    return str
+        .replace(/&amp;/g, '&')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&apos;/g, "'")
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(dec))
+        .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+}
+
+function parseSubtitles(responseText) {
+    const list = [];
+    if (!responseText || typeof responseText !== 'string') return list;
+
+    try {
+        const data = JSON.parse(responseText);
+        if (data.events && Array.isArray(data.events)) {
+            data.events.forEach(event => {
+                if (!event.segs) return;
+                const start = (event.tStartMs || 0) / 1000;
+                let text = event.segs.map(seg => seg.utf8 || '').join('');
+                text = decodeHtmlEntities(text.replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim();
+                if (text) {
+                    list.push({ start, text });
+                }
+            });
+            if (list.length > 0) return list;
+        }
+    } catch (e) {}
+
+    try {
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(responseText, 'text/xml');
+
+        const textNodes = xmlDoc.getElementsByTagName('text');
+        if (textNodes.length > 0) {
+            for (let i = 0; i < textNodes.length; i++) {
+                const node = textNodes[i];
+                const start = parseFloat(node.getAttribute('start')) || 0;
+                let text = decodeHtmlEntities(node.textContent || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+                if (text) list.push({ start, text });
+            }
+            if (list.length > 0) return list;
+        }
+
+        const pNodes = xmlDoc.getElementsByTagName('p');
+        if (pNodes.length > 0) {
+            for (let i = 0; i < pNodes.length; i++) {
+                const node = pNodes[i];
+                let start = 0;
+                if (node.getAttribute('t')) {
+                    start = parseFloat(node.getAttribute('t')) / 1000;
+                } else if (node.getAttribute('start')) {
+                    start = parseFloat(node.getAttribute('start'));
+                }
+                let text = decodeHtmlEntities(node.textContent || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+                if (text) list.push({ start, text });
+            }
+            if (list.length > 0) return list;
+        }
+    } catch (e) {}
+
+    if (responseText.includes('WEBVTT')) {
+        const vttRegex = /(\d{2}:\d{2}:\d{2}\.\d{3})\s*-->\s*\d{2}:\d{2}:\d{2}\.\d{3}\n([\s\S]*?)(?=\n\n|\n\d{2}:\d{2}|\n*$)/g;
+        let match;
+        while ((match = vttRegex.exec(responseText)) !== null) {
+            const timeParts = match[1].split(':');
+            const start = parseFloat(timeParts[0]) * 3600 + parseFloat(timeParts[1]) * 60 + parseFloat(timeParts[2]);
+            let text = decodeHtmlEntities(match[2].replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim();
+            if (text) list.push({ start, text });
+        }
+    }
+
+    return list.sort((a, b) => a.start - b.start);
+}
+
+function onSubtitlesLoaded() {
+    clearLoading();
+    updateStatus('');
+
     const input = uiContainer ? uiContainer.querySelector('#yt-subtitle-search-input') : document.getElementById('yt-subtitle-search-input');
+    if (input) {
+        input.disabled = false;
+        input.placeholder = `Search in ${subtitles.length} lines...`;
+    }
+
+    setupVideoSync();
+    renderResults(input ? input.value.toLowerCase().trim() : '');
+}
+
+function attachEventListeners() {
+    if (!uiContainer) return;
+
+    const input = uiContainer.querySelector('#yt-subtitle-search-input');
     if (input) {
         input.addEventListener('input', (e) => {
             const query = e.target.value.toLowerCase().trim();
@@ -351,8 +464,8 @@ function attachEventListeners() {
         });
     }
 
-    const syncBtn = uiContainer ? uiContainer.querySelector('#yt-ss-sync-btn') : document.getElementById('yt-ss-sync-btn');
-    const resultsContainer = uiContainer ? uiContainer.querySelector('#yt-ss-results') : document.getElementById('yt-ss-results');
+    const syncBtn = uiContainer.querySelector('#yt-ss-sync-btn');
+    const resultsContainer = uiContainer.querySelector('#yt-ss-results');
 
     if (syncBtn) {
         syncBtn.addEventListener('click', () => {
@@ -402,7 +515,7 @@ function renderResults(query) {
         matches = subtitles
             .map((sub, index) => ({ ...sub, index }))
             .filter(sub => sub.text.toLowerCase().includes(query))
-            .slice(0, 200);
+            .slice(0, 300);
     }
 
     if (matches.length === 0) {
