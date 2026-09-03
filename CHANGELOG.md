@@ -5,11 +5,12 @@ All notable changes to this project will be documented in this file.
 ## [1.0.1] - 2026-09-01
 
 ### Fixed
-- **Automatic Subtitle Loading**: Fixed an issue where subtitles would fail to load unless captions were manually toggled on/off in the YouTube player.
-- **SPA Navigation Caption Synchronization**: Intercepted InnerTube `/youtubei/v1/player` responses and added multi-source track discovery (`movie_player`, player caption modules, DOM player data, and same-origin HTML fallback) to ensure fresh caption tracks on all video transitions.
-- **Main-World Proxy Fetching**: Subtitle timedtext data is now fetched with full same-origin credentials across JSON3, XML, and WebVTT formats.
+- **Automatic Subtitle Loading**: Resolved subtitle discovery delays where videos showed "no subtitles available" until manually toggling CC in the YouTube player.
+- **Direct InnerTube API Querying**: Added automatic direct querying of `/youtubei/v1/player` using page runtime `ytcfg` credentials to instantly acquire `captionTracks` without waiting for the video player to initialize.
+- **Subtitle Cue Validation**: Added segment validation across subtitle formats (`json3`, `srv1`, `raw`, `vtt`) in `inject.js` to ensure empty XML headers do not stall subtitle retrieval.
+- **Auto-Retry on Video Playback**: Content script now attaches listeners to video `play` / `playing` events to automatically retry subtitle fetching if metadata was still initializing during initial page load.
 - **UI Window Injection & Reconnection**: Fixed intermittent UI injection failures across YouTube layout experiments, theatre mode, and DOM re-renders via multi-selector fallbacks and continuous DOM connection checks.
-- **Entity Decoding**: Added full HTML entity decoding (e.g. `&#39;`, `&quot;`, `&amp;`) in parsed subtitle segments.
+- **Entity & Multi-segment Decoding**: Full HTML entity decoding (e.g. `&#39;`, `&quot;`, `&amp;`) and XML child `<s>` segment concatenation.
 
 ## [1.0.0] - 2026-08-29
 

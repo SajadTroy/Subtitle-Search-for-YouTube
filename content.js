@@ -74,7 +74,7 @@ function handleNavigation() {
 
         subtitleLoadTimeout = setTimeout(() => {
             startSubtitleFlow(videoId);
-        }, 400);
+        }, 300);
     } else {
         ensureUiInjected();
     }
@@ -179,11 +179,28 @@ function removeUI() {
     uiContainer = null;
 }
 
-function updateStatus(msg) {
+function updateStatus(msg, isRetryable = false) {
     const statusEl = uiContainer ? uiContainer.querySelector('#yt-ss-status') : document.getElementById('yt-ss-status');
     if (statusEl) {
-        statusEl.textContent = msg;
-        statusEl.style.display = msg ? 'block' : 'none';
+        if (!msg) {
+            statusEl.innerHTML = '';
+            statusEl.style.display = 'none';
+            return;
+        }
+
+        if (isRetryable && currentVideoId) {
+            statusEl.innerHTML = `<span>${msg}</span> <a href="#" id="yt-ss-retry-link" style="color: var(--ss-active-border); text-decoration: underline; margin-left: 6px; cursor: pointer;">Retry</a>`;
+            const retryLink = statusEl.querySelector('#yt-ss-retry-link');
+            if (retryLink) {
+                retryLink.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    if (currentVideoId) startSubtitleFlow(currentVideoId);
+                });
+            }
+        } else {
+            statusEl.textContent = msg;
+        }
+        statusEl.style.display = 'block';
     }
 }
 
@@ -218,7 +235,7 @@ async function startSubtitleFlow(videoId) {
 
     showLoading();
 
-    const tracks = await requestCaptionTracks(videoId);
+    let tracks = await requestCaptionTracks(videoId);
     if (currentVideoId !== videoId) return;
 
     if (tracks && tracks.length > 0) {
@@ -227,12 +244,21 @@ async function startSubtitleFlow(videoId) {
     }
 
     window.postMessage({ type: 'TRIGGER_PLAYER_CAPTIONS', videoId: videoId }, '*');
-    const intercepted = await waitForSubtitles(5000, videoId);
+    const intercepted = await waitForSubtitles(4000, videoId);
 
     if (currentVideoId !== videoId) return;
+    if (intercepted || subtitles.length > 0) return;
 
-    if (!intercepted && subtitles.length === 0) {
-        updateStatus('No subtitles available for this video.');
+    tracks = await requestCaptionTracks(videoId);
+    if (currentVideoId !== videoId) return;
+
+    if (tracks && tracks.length > 0) {
+        const loaded = await loadSubtitlesFromTracks(tracks, videoId);
+        if (loaded || subtitles.length > 0) return;
+    }
+
+    if (subtitles.length === 0 && currentVideoId === videoId) {
+        updateStatus('No subtitles available for this video.', true);
         clearLoading();
         const input = uiContainer ? uiContainer.querySelector('#yt-subtitle-search-input') : document.getElementById('yt-subtitle-search-input');
         if (input) {
@@ -258,7 +284,7 @@ function requestCaptionTracks(videoId) {
         setTimeout(() => {
             window.removeEventListener('message', listener);
             resolve([]);
-        }, 3500);
+        }, 4000);
     });
 }
 
@@ -389,7 +415,7 @@ function parseSubtitles(responseText) {
                     list.push({ start, text });
                 }
             });
-            if (list.length > 0) return list;
+            if (list.length > 0) return list.sort((a, b) => a.start - b.start);
         }
     } catch (e) {}
 
@@ -405,7 +431,7 @@ function parseSubtitles(responseText) {
                 let text = decodeHtmlEntities(node.textContent || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
                 if (text) list.push({ start, text });
             }
-            if (list.length > 0) return list;
+            if (list.length > 0) return list.sort((a, b) => a.start - b.start);
         }
 
         const pNodes = xmlDoc.getElementsByTagName('p');
@@ -418,20 +444,35 @@ function parseSubtitles(responseText) {
                 } else if (node.getAttribute('start')) {
                     start = parseFloat(node.getAttribute('start'));
                 }
-                let text = decodeHtmlEntities(node.textContent || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+
+                let text = '';
+                const sNodes = node.getElementsByTagName('s');
+                if (sNodes.length > 0) {
+                    for (let j = 0; j < sNodes.length; j++) {
+                        text += sNodes[j].textContent || '';
+                    }
+                } else {
+                    text = node.textContent || '';
+                }
+
+                text = decodeHtmlEntities(text).replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
                 if (text) list.push({ start, text });
             }
-            if (list.length > 0) return list;
+            if (list.length > 0) return list.sort((a, b) => a.start - b.start);
         }
     } catch (e) {}
 
-    if (responseText.includes('WEBVTT')) {
-        const vttRegex = /(\d{2}:\d{2}:\d{2}\.\d{3})\s*-->\s*\d{2}:\d{2}:\d{2}\.\d{3}\n([\s\S]*?)(?=\n\n|\n\d{2}:\d{2}|\n*$)/g;
+    if (responseText.includes('WEBVTT') || responseText.includes('-->')) {
+        const vttRegex = /(?:(\d{2}:)?(\d{2}):(\d{2})[.,](\d{3}))\s*-->\s*(?:(\d{2}:)?(\d{2}):(\d{2})[.,](\d{3}))\n([\s\S]*?)(?=\n\n|\n\d{2}:|\n*$)/g;
         let match;
         while ((match = vttRegex.exec(responseText)) !== null) {
-            const timeParts = match[1].split(':');
-            const start = parseFloat(timeParts[0]) * 3600 + parseFloat(timeParts[1]) * 60 + parseFloat(timeParts[2]);
-            let text = decodeHtmlEntities(match[2].replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim();
+            const h = match[1] ? parseFloat(match[1].replace(':', '')) : 0;
+            const m = parseFloat(match[2]);
+            const s = parseFloat(match[3]);
+            const ms = parseFloat(match[4]) / 1000;
+            const start = h * 3600 + m * 60 + s + ms;
+
+            let text = decodeHtmlEntities(match[9].replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim();
             if (text) list.push({ start, text });
         }
     }
@@ -564,6 +605,16 @@ function setupVideoSync() {
     if (videoElement) {
         videoElement.removeEventListener('timeupdate', syncSubtitles);
         videoElement.addEventListener('timeupdate', syncSubtitles);
+
+        const onPlay = () => {
+            if (subtitles.length === 0 && currentVideoId && !isLoadingSubtitles) {
+                startSubtitleFlow(currentVideoId);
+            }
+        };
+        videoElement.removeEventListener('play', onPlay);
+        videoElement.addEventListener('play', onPlay);
+        videoElement.removeEventListener('playing', onPlay);
+        videoElement.addEventListener('playing', onPlay);
     }
 }
 

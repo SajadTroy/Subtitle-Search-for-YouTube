@@ -12,7 +12,7 @@
                     const response = await originalFetch.apply(this, args);
                     const clone = response.clone();
                     clone.text().then(text => {
-                        if (text && text.trim()) {
+                        if (text && hasSubtitleCues(text)) {
                             window.postMessage({ type: 'YT_INTERCEPTED_SUBTITLES', url: url, data: text }, '*');
                             if (restoreCaptionTrack) {
                                 restoreCaptionTrack();
@@ -62,7 +62,7 @@
     XMLHttpRequest.prototype.send = function() {
         this.addEventListener('load', function() {
             if (this._url) {
-                if (this._url.includes('api/timedtext') && this.responseText && this.responseText.trim()) {
+                if (this._url.includes('api/timedtext') && this.responseText && hasSubtitleCues(this.responseText)) {
                     window.postMessage({ type: 'YT_INTERCEPTED_SUBTITLES', url: this._url, data: this.responseText }, '*');
                     if (restoreCaptionTrack) {
                         restoreCaptionTrack();
@@ -86,6 +86,23 @@
         });
         return originalSend.apply(this, arguments);
     };
+
+    function hasSubtitleCues(text) {
+        if (!text || typeof text !== 'string') return false;
+        const trimmed = text.trim();
+        if (!trimmed) return false;
+
+        if (trimmed.startsWith('{') && (trimmed.includes('"events"') || trimmed.includes('"segs"'))) {
+            return true;
+        }
+        if (trimmed.includes('<text') || trimmed.includes('<p ') || trimmed.includes('<p>') || trimmed.includes('<s>')) {
+            return true;
+        }
+        if (trimmed.includes('WEBVTT') || trimmed.includes('-->')) {
+            return true;
+        }
+        return false;
+    }
 
     function extractTracksFromData(data) {
         if (!data) return null;
@@ -164,6 +181,53 @@
         return null;
     }
 
+    async function fetchInnerTubePlayerResponse(targetVideoId) {
+        try {
+            let apiKey = '';
+            let context = {
+                client: {
+                    clientName: 'WEB',
+                    clientVersion: '2.20240101.01.00',
+                    hl: navigator.language || 'en',
+                    gl: 'US'
+                }
+            };
+
+            if (window.ytcfg && typeof window.ytcfg.get === 'function') {
+                apiKey = window.ytcfg.get('INNERTUBE_API_KEY') || '';
+                const cfgContext = window.ytcfg.get('INNERTUBE_CONTEXT');
+                if (cfgContext) {
+                    context = cfgContext;
+                }
+            }
+
+            const endpoint = apiKey ? `/youtubei/v1/player?key=${apiKey}&prettyPrint=false` : '/youtubei/v1/player';
+            const res = await originalFetch(endpoint, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    context: context,
+                    videoId: targetVideoId
+                }),
+                credentials: 'same-origin'
+            });
+
+            if (res.ok) {
+                const data = await res.json();
+                if (data) {
+                    cachedPlayerResponses[targetVideoId] = data;
+                    const tracks = extractTracksFromData(data);
+                    if (tracks && tracks.length > 0) {
+                        return tracks;
+                    }
+                }
+            }
+        } catch (e) {}
+        return null;
+    }
+
     async function fetchHtmlPlayerResponse(targetVideoId) {
         try {
             const res = await originalFetch(`/watch?v=${targetVideoId}`, { credentials: 'same-origin' });
@@ -196,24 +260,57 @@
     async function fetchSubtitleContent(url) {
         if (!url) return null;
 
-        const formats = ['', 'json3', 'srv1', 'vtt'];
+        const formats = ['json3', 'srv1', '', 'vtt'];
         for (const fmt of formats) {
             try {
                 let fetchUrl = url;
-                if (fmt && !fetchUrl.includes(`fmt=${fmt}`)) {
+                if (fmt) {
                     fetchUrl = fetchUrl.replace(/([?&])fmt=[^&]*/g, '$1').replace(/[?&]$/, '');
                     fetchUrl += (fetchUrl.includes('?') ? '&' : '?') + 'fmt=' + fmt;
+                } else {
+                    fetchUrl = fetchUrl.replace(/([?&])fmt=[^&]*/g, '$1').replace(/[?&]$/, '');
                 }
+
                 const response = await originalFetch(fetchUrl, { credentials: 'same-origin' });
                 if (response.ok) {
                     const text = await response.text();
-                    if (text && text.trim()) {
+                    if (hasSubtitleCues(text)) {
                         return text;
                     }
                 }
             } catch (e) {}
         }
+
+        try {
+            const response = await originalFetch(url, { credentials: 'same-origin' });
+            if (response.ok) {
+                const text = await response.text();
+                if (text && text.trim()) return text;
+            }
+        } catch (e) {}
+
         return null;
+    }
+
+    async function resolveAllCaptionTracks(targetVideoId) {
+        let tracks = getCaptionTracksFromPage(targetVideoId);
+        if (tracks && tracks.length > 0) return tracks;
+
+        tracks = await fetchInnerTubePlayerResponse(targetVideoId);
+        if (tracks && tracks.length > 0) return tracks;
+
+        let attempts = 0;
+        while (attempts < 6) {
+            await new Promise(r => setTimeout(r, 200));
+            tracks = getCaptionTracksFromPage(targetVideoId);
+            if (tracks && tracks.length > 0) return tracks;
+            attempts++;
+        }
+
+        tracks = await fetchHtmlPlayerResponse(targetVideoId);
+        if (tracks && tracks.length > 0) return tracks;
+
+        return [];
     }
 
     window.addEventListener('message', async function(event) {
@@ -221,20 +318,7 @@
 
         if (event.data.type === 'GET_YT_CAPTION_TRACKS') {
             const targetVideoId = event.data.videoId;
-            let tracks = getCaptionTracksFromPage(targetVideoId);
-
-            if (!tracks && targetVideoId) {
-                let attempts = 0;
-                while (!tracks && attempts < 10) {
-                    await new Promise(r => setTimeout(r, 200));
-                    tracks = getCaptionTracksFromPage(targetVideoId);
-                    attempts++;
-                }
-
-                if (!tracks) {
-                    tracks = await fetchHtmlPlayerResponse(targetVideoId);
-                }
-            }
+            const tracks = await resolveAllCaptionTracks(targetVideoId);
 
             window.postMessage({
                 type: 'YT_CAPTION_TRACKS_RESPONSE',
@@ -267,38 +351,30 @@
                         player.loadModule('captions');
                     }
 
-                    const prevTrack = typeof player.getOption === 'function' ? player.getOption('captions', 'track') : null;
                     const tracklist = typeof player.getOption === 'function' ? player.getOption('captions', 'tracklist') : null;
-
                     if (tracklist && Array.isArray(tracklist) && tracklist.length > 0) {
+                        const tracks = tracklist.map(t => ({
+                            baseUrl: t.baseUrl || t.url || '',
+                            languageCode: t.languageCode || t.vssId?.replace(/^[a-z]\./, '') || 'en',
+                            name: { simpleText: t.languageName || t.name || t.displayName || 'Subtitles' },
+                            kind: t.kind || (t.vssId?.startsWith('a.') ? 'asr' : undefined),
+                            vssId: t.vssId
+                        })).filter(t => Boolean(t.baseUrl));
+
+                        if (tracks.length > 0) {
+                            window.postMessage({ type: 'YT_CAPTIONS_TRACKS_AVAILABLE', videoId: targetVideoId, tracks: tracks }, '*');
+                        }
+
                         const targetTrack = (targetLang ? tracklist.find(t => t.languageCode === targetLang) : null) || tracklist[0];
                         if (targetTrack && typeof player.setOption === 'function') {
                             player.setOption('captions', 'track', targetTrack);
-                            if (typeof player.toggleSubtitlesOn === 'function') {
-                                player.toggleSubtitlesOn();
-                            }
-
-                            restoreCaptionTrack = () => {
-                                try {
-                                    if (!prevTrack || !prevTrack.languageCode) {
-                                        player.setOption('captions', 'track', {});
-                                        if (typeof player.toggleSubtitlesOff === 'function') {
-                                            player.toggleSubtitlesOff();
-                                        }
-                                    } else {
-                                        player.setOption('captions', 'track', prevTrack);
-                                    }
-                                } catch (e) {}
-                            };
-
-                            setTimeout(() => {
-                                if (restoreCaptionTrack) {
-                                    restoreCaptionTrack();
-                                    restoreCaptionTrack = null;
-                                }
-                            }, 8000);
                         }
-                    } else if (typeof player.toggleSubtitlesOn === 'function') {
+                    }
+
+                    const prevTrack = typeof player.getOption === 'function' ? player.getOption('captions', 'track') : null;
+                    const hasActiveTrack = prevTrack && Boolean(prevTrack.languageCode);
+
+                    if (typeof player.toggleSubtitlesOn === 'function' && !hasActiveTrack) {
                         player.toggleSubtitlesOn();
                         restoreCaptionTrack = () => {
                             try {
